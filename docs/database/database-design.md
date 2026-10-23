@@ -2,6 +2,8 @@
 
 This is a logical model for Phase 0, not a final migration script. Use PostgreSQL and Sequelize with UUID primary keys, UTC timestamps (`created_at`, `updated_at`), and `deleted_at` only for records that may be safely soft-deleted. Clinical facts, financial transactions, audit events, appointments and status histories should generally be retained and corrected by amendment/reversal rather than soft-deleted. Use explicit status columns with constrained values (PostgreSQL enums or checked strings); favor checked strings if evolving states should not require fragile enum migrations.
 
+This document includes future-domain reference entities and is broader than the confirmed MVP. The canonical, MVP-bounded initial schema is [the architecture ERD](../architecture/database-erd.md); implement only those entities and relationships until later modules are scoped.
+
 ## Conventions
 
 - UUID PKs; `tenant_id UUID NOT NULL` for tenant-owned entities. Identity `users` and patient identity may be global; tenant relationships are explicit.
@@ -18,7 +20,7 @@ This is a logical model for Phase 0, not a final migration script. Use PostgreSQ
 - `roles(id, code, name, scope_type)` and `permissions(id, code, description)`; unique role/permission codes.
 - `user_roles(id, user_id, role_id, tenant_id nullable, branch_id nullable, assigned_by, created_at)`. Scope role assignments; unique applicable assignment.
 - `role_permissions(role_id, permission_id)` unique pair. Effective permission remains subject to resource policy.
-- `hospitals(id, tenant_id unique, name, status, settings)`; alternatively hospital ID itself may be tenant ID—choose one convention in Phase 1. Recommended simpler convention: `hospitals.id = tenant_id`.
+- `hospitals(id, name, status, settings)`; `hospitals.id` is the tenant UUID. Do not store a duplicate `tenant_id` on the hospital row. Tenant-owned child rows use `tenant_id` referencing `hospitals.id`.
 - `branches(id, tenant_id, name, timezone, address, status)`; unique `(tenant_id, normalized_name)` as appropriate.
 - `departments(id, tenant_id, branch_id nullable, name, status)`; FK branch with matching tenant.
 - `staff(id, tenant_id, user_id, employee_ref, status)`; unique `(tenant_id,user_id)`.
@@ -119,4 +121,4 @@ erDiagram
   INVOICES ||--o{ PAYMENTS : settled_by
 ```
 
-The diagram omits tenant consistency FKs and several future tables for readability. Resolve whether hospitals.id is the tenant UUID and the exact login identity policy before migrations.
+The diagram omits tenant consistency FKs and several future tables for readability. The initial ERD in [architecture/database-erd.md](../architecture/database-erd.md) is the canonical, MVP-bounded version. Confirm exact login identity policy before migrations.

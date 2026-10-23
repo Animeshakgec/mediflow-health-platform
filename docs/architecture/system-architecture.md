@@ -1,126 +1,74 @@
-# System Architecture
+# MediFlow System Architecture
 
-## Architectural shape
+## Goals and boundaries
 
-MediFlow starts as a **modular monolith**: one Node.js/Express REST API and one PostgreSQL database, organized by business module. This keeps deployment and transactions simple while preserving boundaries that may support later extraction. The API is the only trusted path to application data. Patient and hospital web clients are separate React/Vite applications (or separately deployed frontends) that call the same versioned API. They do not connect directly to PostgreSQL, Redis, or S3.
+MediFlow starts as a **modular monolith**: one JavaScript ES Modules codebase, one Express REST API deployment, and one PostgreSQL database. Business capabilities have explicit module boundaries while sharing deployment and transactional storage. Do not introduce microservices, event streaming, Redis, or a frontend implementation during this architecture phase.
 
-## Components and communication
+The backend is the trusted boundary for identity, input validation, authorization, tenant scoping, and persistence. Browser clients never connect directly to PostgreSQL. Future external providers are reached through backend adapters.
 
-| Component | Responsibility | Communication |
-|---|---|---|
-| Patient application | Patient and dependent workflows | HTTPS JSON REST calls to API; browser receives short-lived signed file URLs when authorized |
-| Hospital dashboard | Staff workflows, scoped to assigned hospital/branch | HTTPS JSON REST calls to API; same server-side policy checks as patient app |
-| Backend API | Validation, authentication, authorization, tenant scoping, workflows, persistence, integrations | Express routes → module services → Sequelize/PostgreSQL; enqueue jobs through Redis-backed queue |
-| PostgreSQL | Authoritative relational and transactional records | API and job workers through Sequelize; network access restricted to application runtime |
-| Redis | Queue transport and, where justified, short-lived cache/rate-limit data | API publishes jobs; worker consumes jobs; never authoritative for clinical records or appointment correctness |
-| AWS S3 | Private medical document object storage | Backend issues narrowly scoped presigned upload/download URLs after policy checks |
-| Background worker | Reminders, notifications, document/report processing | Consumes queued jobs; reads/writes through shared modules and DB; emits provider requests |
-| Notification providers | Email/SMS/push delivery | Worker/API adapter calls provider APIs; provider callbacks are verified before processing |
-| External integrations | Payment gateway initially; future labs, FHIR/ABDM, insurance, telemedicine | Isolated adapters; outbound calls from backend/worker, never direct from browser |
+## MVP scope
 
-The API and worker are separate runtime processes from the same codebase and can be deployed independently, but they are not separate business microservices. Critical state changes remain in PostgreSQL transactions. A durable outbox is recommended when notification/job loss would be harmful: write the business change and outbox event in one transaction, then publish/retry asynchronously.
+MVP is limited to authentication; hospital and branch management; doctor and patient profiles; staff role/membership assignment; doctor weekly availability and exceptions; and appointment booking, cancellation, and rescheduling. The first implementation should include the security and operational foundations required by these workflows: validated configuration, migrations, structured logging, audit events, API docs, and tenant-aware authorization.
 
-## High-level architecture
+Explicitly deferred: queue/check-in, consultation and EMR, prescriptions, billing/payments, lab, pharmacy/inventory, document storage/sharing, notifications beyond necessary account/booking communication, AI, and interoperability. Each needs separate workflow and policy definition.
+
+## Logical architecture
 
 ```mermaid
 flowchart LR
-  P[Patient React app] -->|HTTPS REST /api/v1| API[Express API modular monolith]
-  H[Hospital React dashboard] -->|HTTPS REST /api/v1| API
-  API --> AUTH[Auth, tenant and resource policy boundary]
-  AUTH --> MOD[Domain modules]
-  MOD -->|Sequelize transactions| PG[(PostgreSQL)]
-  API -->|enqueue| Q[(Redis queue)]
-  Q --> W[Background worker]
-  W --> PG
-  API -->|authorized presigned URL| S3[(Private S3 bucket)]
-  P -. direct upload/download using short-lived URL .-> S3
-  H -. direct upload/download using short-lived URL .-> S3
-  W --> N[Email / SMS / push providers]
-  MOD --> PAY[Payment provider adapter]
-  W --> INT[Future integration adapters]
+  PA[Patient web app<br/>React / Vite, later] -->|HTTPS JSON /api/v1| API[Express API<br/>modular monolith]
+  HA[Hospital web app<br/>React / Vite, later] -->|HTTPS JSON /api/v1| API
+  API --> SEC[Authentication, RBAC,<br/>tenant and resource policies]
+  SEC --> MOD[Business modules<br/>auth, hospitals, doctors,<br/>patients, schedules, appointments]
+  MOD --> ORM[Sequelize repositories<br/>and transactions]
+  ORM --> PG[(PostgreSQL)]
+  API --> LOG[Redacted operational logs]
+  MOD --> AUD[Append-only audit events]
+  AUD --> PG
+  API -. future adapters .-> EXT[Email, storage, payment<br/>and other providers]
 ```
 
-## Patient request flow
+## Request flow
 
-```mermaid
-sequenceDiagram
-  participant Patient
-  participant App as Patient app
-  participant API as Express API
-  participant Policy as Auth/tenant/resource policy
-  participant DB as PostgreSQL
-  Patient->>App: Search or request own record
-  App->>API: HTTPS request with access token
-  API->>Policy: Validate token, actor, tenant context, resource scope
-  Policy-->>API: Allow only matching patient/dependent grant
-  API->>DB: Validated, tenant-scoped query
-  DB-->>API: Authorized records
-  API-->>App: Standard JSON response
-  App-->>Patient: Render result
-```
+1. Express assigns or accepts a trusted request ID, parses the request, and applies security headers and rate limits.
+2. Zod validates route parameters, query, and body against an explicit schema.
+3. Authentication establishes the actor. Authorization checks role capability, verified tenant membership, resource relationship, branch scope, and allowed state transition.
+4. A module service executes the use case. Repositories receive tenant context and use Sequelize transactions where multiple writes or booking contention require atomicity.
+5. The API returns the standard success/error envelope and request ID. Logs capture operational metadata; audit events capture sensitive access and security-relevant changes without copying clinical payloads.
 
-## Hospital staff request flow
+## Runtime and deployment shape
 
-```mermaid
-sequenceDiagram
-  participant Staff
-  participant UI as Hospital dashboard
-  participant API
-  participant Policy as Auth/RBAC/tenant/resource policy
-  participant DB as PostgreSQL
-  Staff->>UI: Open assigned hospital workflow
-  UI->>API: HTTPS request with access token and selected organization context
-  API->>Policy: Verify identity, active membership, role, branch and patient relationship
-  Policy-->>API: Permit only the minimum authorized action
-  API->>DB: Transactional tenant-scoped operation
-  DB-->>API: Result
-  API-->>UI: JSON response; sensitive access recorded
-```
+Initially run one API process type and PostgreSQL. Keep the Express app factory separate from the `server.js` listener so future API tests can import it. A scheduled worker can be introduced when notification or cleanup needs are defined; it remains part of the same codebase and is not a microservice. Redis, S3, and external provider adapters are future infrastructure decisions.
 
-## File upload flow
+## Frontend boundary
 
-```mermaid
-sequenceDiagram
-  participant Client
-  participant API
-  participant DB as PostgreSQL
-  participant S3 as Private S3
-  Client->>API: Request upload for a patient/document purpose
-  API->>API: Authenticate, authorize patient/tenant, validate declared metadata
-  API->>DB: Create pending document/version record and opaque object key
-  API-->>Client: Short-lived presigned PUT URL and upload constraints
-  Client->>S3: Upload directly using URL
-  Client->>API: Confirm upload
-  API->>S3: Verify object exists/size and expected key
-  API->>DB: Mark version available (or quarantined pending scan)
-  API-->>Client: Document metadata; no public object URL
-```
+Plan two React/Vite clients: patient application and hospital staff dashboard. Both call the same `/api/v1` API. The UI may hide unavailable actions for usability, but server-side authorization remains authoritative. See [frontend architecture](frontend-architecture.md).
 
-## Background job flow
+## Development milestones
 
-```mermaid
-sequenceDiagram
-  participant API
-  participant DB as PostgreSQL/outbox
-  participant Redis
-  participant Worker
-  participant Provider as Notification provider
-  API->>DB: Commit appointment and outbox event in one transaction
-  Worker->>DB: Claim unpublished outbox event
-  Worker->>Redis: Enqueue idempotent job
-  Worker->>Provider: Send reminder using provider adapter
-  Provider-->>Worker: Delivery result/callback
-  Worker->>DB: Record attempts and delivery status
-```
+1. **Architecture complete:** scope and conventions documented; no application code yet.
+2. **Backend foundation and authentication:** JavaScript ES Modules, Express composition, environment validation, Sequelize/PostgreSQL migrations, request IDs, response/error handling, Pino, OpenAPI, authentication, and RBAC.
+3. **Organization and profiles:** hospital tenant, branches, departments where needed, scoped staff memberships, doctor profile/branch affiliations, and patient profile.
+4. **Availability and appointments:** recurring schedules, exceptions, availability reads, atomic booking, cancellation, rescheduling, status history, and idempotent retries.
+5. **MVP clients:** patient booking and hospital management workflows using the API.
+6. **Outpatient care:** queue/check-in, encounters, clinical notes, diagnoses, prescriptions.
+7. **Expansion:** payments/billing, lab, pharmacy/inventory, consent/documents, richer notifications/reports, and future AI/interoperability after separate discovery.
 
-## Authentication and authorization boundary
+Milestones 6–7 are roadmap only and are outside the initial MVP.
 
-Authentication establishes the user identity. Authorization is enforced on every API operation, never inferred from a hidden UI control. Middleware validates credentials and establishes the actor; module policies then check role/permission, active tenant membership, resource ownership/relationship, branch scope, consent and purpose where relevant. Database access is tenant-scoped by construction. A super-admin path is explicit, highly restricted and audited; it is not a bypass available to ordinary hospital staff.
+## Architecture constraints
 
-## Deployment and evolution
+- PostgreSQL is authoritative. UUID primary keys and migrations are used from the first schema.
+- Use transaction-safe constraints for booking; application checks alone cannot prevent double booking.
+- Healthcare data is sensitive. Minimize collected/returned fields and redact logs. This design is not a regulatory-compliance claim.
+- Keep integrations behind adapters and modules behind stable service interfaces.
+- See [multi-tenancy](multi-tenancy.md), [backend architecture](backend-architecture.md), and [database ERD](database-erd.md) for implementation boundaries.
 
-Deploy the API, worker, PostgreSQL, Redis, and private S3 bucket as managed services where practical (AWS or Render-compatible hosting). Use HTTPS, secret management, health checks, migrations, backups and environment separation. Avoid Docker in Phase 0: it does not solve a defined requirement for this single modular monolith and adds setup surface. Revisit if reproducible local dependencies or deployment orchestration become a concrete team need.
+## Decisions still required before implementation or production
 
-## MVP boundary
+- **Before identity implementation:** target login identifier (email, phone, or both), verification requirements, account recovery rules, JWT signing/key-rotation mechanism, and exact refresh-session revocation policy.
+- **Before schedule/booking implementation:** appointment duration/slot granularity, treatment of daylight-saving transitions, whether temporary holds exist, booking horizon, allowed cancellation/reschedule windows, and the exact appointment states that reserve capacity.
+- **Before tenant operations:** whether staff memberships are hospital-wide or branch-limited by default, patient registration/duplicate matching policy, and the workflow for a patient who uses multiple hospitals.
+- **Before production deployment:** launch jurisdiction, hosting/data residency, applicable privacy/security/retention and breach obligations, secret management, backup/restore objectives, and incident response ownership.
 
-Start with patient identity/profile, hospital/doctor discovery, appointment lifecycle, queue/check-in, basic encounter documentation, prescriptions, document metadata/storage integration design, invoices/payments integration boundary, notifications and audit events. Labs, pharmacy, beds, nursing, advanced reporting and standards integrations are staged as V1/future capabilities (see [product scope](../product/product-scope.md)).
+Payment collection timing, document upload release controls, clinical workflow policies, and external integrations remain deferred because they are outside this MVP. Resolve them during the phase that introduces those capabilities. These are product/operational decisions; the selected modular-monolith, PostgreSQL, UUID, and shared-table tenant direction is already established.
