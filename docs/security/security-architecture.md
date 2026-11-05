@@ -4,16 +4,16 @@ Security controls must be implemented and validated before real patient data is 
 
 ## Identity and access
 
-- Hash passwords with Argon2id or a well-maintained bcrypt configuration; unique salts are automatic. Never encrypt passwords reversibly or log credentials.
+- Phase 2 hashes passwords using bcryptjs with work factor 12 and unique salts. Benchmark work factor against deployment capacity and keep password hashes private. Never encrypt passwords reversibly or log credentials.
 - Use short-lived signed JWT access tokens with minimal claims (`sub`, token/session ID, expiry, issuer/audience). Keep permissions and tenant membership authoritative server-side or version claims so revocation can take effect.
-- Store refresh tokens hashed, rotate on every use, detect reuse, revoke the token family on suspicious reuse/logout/password reset. Protect browser storage according to client threat model; secure, HttpOnly, SameSite cookies are preferred for refresh credentials where deployment permits.
+- Store refresh tokens as SHA-256 hashes, rotate on every use, detect reuse, and revoke the token family on suspicious reuse/logout/password change. Browser refresh cookies are HttpOnly, Secure in production, and SameSite=Lax by default. The API checks allowed origins on refresh/logout.
 - Enforce RBAC plus tenant, resource, relationship and purpose checks on every backend operation. Do not trust frontend authorization or client-selected tenant IDs.
 - Apply least privilege to staff roles and database/service credentials. Support exceptional access with reason, expiry, audit and review.
 
 ## API and browser controls
 
 - Apply Helmet with reviewed headers; configure CORS for explicit frontend origins, methods and headers. CORS is not authorization.
-- Rate-limit login, recovery, booking, token refresh and sensitive lookup endpoints; use Redis-backed limits only as a distributed control, not as the sole security boundary.
+- Rate-limit registration, login, refresh, and password change. Phase 2 uses the process-local limiter; production multi-instance deployments need a shared store and infrastructure-level abuse controls.
 - Validate params/query/body with Zod; allow-list filters and transitions; use Sequelize parameterization. Protect against mass assignment by explicit input schemas.
 - Use TLS, secure cookie settings where applicable, CSRF controls for cookie-authenticated mutations, content security policy and dependency updates.
 
