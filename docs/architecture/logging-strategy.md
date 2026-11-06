@@ -10,6 +10,8 @@ Use Pino structured JSON logs with timestamp, severity, service/environment, req
 
 Configure Pino redaction for `authorization`, `cookie`, `set-cookie`, password/secret/token fields, signed URL query parameters, payment credentials, and health data fields. Redact at the logger boundary and do not rely on each caller to remember. Production logs must use access-controlled centralized storage and a documented retention policy. Never use production patient data in development logs.
 
+Phase 2 logs authentication outcomes through Pino with event, outcome, and actor UUID when known; failed-login events omit the submitted email. This is operational logging only: the durable append-only `audit_events` store is not implemented yet.
+
 ## Audit event convention
 
 An append-only `audit_events` record should contain a UUID, timestamp, actor user ID (nullable for unauthenticated/system activity), tenant ID (nullable for platform-level events), action code, resource type and ID, outcome, request ID, source/channel, and reason/purpose when policy requires it. Store only the minimum metadata needed to establish what happened. Do not copy clinical payloads or credentials. Restrict read access; application APIs must not update/delete historical events. Use database privileges and operational controls to make tampering detectable; define retention under applicable policy before production.

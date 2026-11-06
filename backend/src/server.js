@@ -8,6 +8,7 @@ import {
 } from './config/database.js';
 import { loadEnv } from './config/env.js';
 import { createLogger } from './config/logger.js';
+import { initializeModels } from './models/index.js';
 
 export function createShutdownHandler({ server, sequelize, logger, onShutdown = () => {} }) {
   let shutdownPromise;
@@ -47,6 +48,7 @@ export function createShutdownHandler({ server, sequelize, logger, onShutdown = 
 export async function startServer({ env = loadEnv(), sequelize, logger, app } = {}) {
   const runtimeLogger = logger ?? createLogger({ env: env.NODE_ENV, level: env.LOG_LEVEL });
   const database = sequelize ?? createDatabaseConnection(env, runtimeLogger);
+  initializeModels(database);
 
   try {
     await testDatabaseConnection(database);
@@ -73,6 +75,18 @@ export async function startServer({ env = loadEnv(), sequelize, logger, app } = 
       apiPrefix: env.API_PREFIX,
       corsOrigins: env.CORS_ORIGIN,
       jsonBodyLimit: env.JSON_BODY_LIMIT,
+      authConfig: {
+        jwtAccessSecret: env.JWT_ACCESS_SECRET,
+        jwtIssuer: env.JWT_ISSUER,
+        jwtAudience: env.JWT_AUDIENCE,
+        accessTtlSeconds: env.JWT_ACCESS_TTL_SECONDS,
+        refreshTtlSeconds: env.AUTH_REFRESH_TTL_SECONDS,
+        cookieName: env.AUTH_COOKIE_NAME,
+        cookieSameSite: env.AUTH_COOKIE_SAME_SITE,
+        cookieSecure: env.AUTH_COOKIE_SECURE,
+        rateLimitWindowMs: env.AUTH_RATE_LIMIT_WINDOW_MS,
+        rateLimitMax: env.AUTH_RATE_LIMIT_MAX,
+      },
     });
 
   const server = expressApp.listen(env.PORT);

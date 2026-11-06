@@ -1,4 +1,5 @@
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import express from 'express';
 import helmet from 'helmet';
 import swaggerUi from 'swagger-ui-express';
@@ -9,6 +10,7 @@ import { createRequestLogger } from './common/middleware/requestLogger.js';
 import { AppError } from './common/errors/AppError.js';
 import { createLogger } from './config/logger.js';
 import { createHealthRouter } from './modules/health/health.routes.js';
+import { createAuthRouter } from './modules/auth/auth.routes.js';
 
 export function createApp({
   sequelize = null,
@@ -16,10 +18,11 @@ export function createApp({
   apiPrefix = '/api/v1',
   corsOrigins = ['http://localhost:5173', 'http://localhost:5174'],
   jsonBodyLimit = '1mb',
+  authConfig = null,
   apiRouters = [],
 } = {}) {
   const app = express();
-  const openApiSpec = createOpenApiSpec(apiPrefix);
+  const openApiSpec = createOpenApiSpec(apiPrefix, authConfig?.cookieName);
 
   app.disable('x-powered-by');
   app.use(helmet());
@@ -34,11 +37,17 @@ export function createApp({
   );
   app.use(createRequestLogger(logger));
   app.use(express.json({ limit: jsonBodyLimit }));
+  app.use(cookieParser());
 
   app.get('/api-docs.json', (_req, res) => res.json(openApiSpec));
   app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(openApiSpec));
 
   app.use(apiPrefix, createHealthRouter(sequelize));
+  if (sequelize && authConfig)
+    app.use(
+      apiPrefix,
+      createAuthRouter({ sequelize, config: authConfig, apiPrefix, corsOrigins, logger }),
+    );
   for (const router of apiRouters) app.use(apiPrefix, router);
 
   app.use(notFound);

@@ -55,6 +55,23 @@ const envSchema = z.object({
     ),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   JSON_BODY_LIMIT: z.string().trim().min(1).default('1mb'),
+  JWT_ACCESS_SECRET: z
+    .string()
+    .min(32, 'must contain at least 32 characters')
+    .default('development-only-change-this-secret-before-use'),
+  JWT_ISSUER: z.string().trim().min(1).default('mediflow-api'),
+  JWT_AUDIENCE: z.string().trim().min(1).default('mediflow-clients'),
+  JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
+  AUTH_REFRESH_TTL_SECONDS: z.coerce.number().int().min(3600).max(2_592_000).default(2_592_000),
+  AUTH_COOKIE_NAME: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9_-]{1,64}$/)
+    .default('mediflow_refresh'),
+  AUTH_COOKIE_SAME_SITE: z.enum(['lax', 'strict']).default('lax'),
+  AUTH_COOKIE_SECURE: booleanFromString,
+  AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(900_000),
+  AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(100).default(10),
 });
 
 export class ConfigurationError extends Error {
@@ -74,6 +91,15 @@ export function loadEnv(source = process.env, { loadDotEnv = source === process.
   }
 
   const env = parsed.data;
+  if (env.NODE_ENV === 'production' && !env.AUTH_COOKIE_SECURE) {
+    throw new ConfigurationError('AUTH_COOKIE_SECURE must be enabled in production.');
+  }
+  if (
+    env.NODE_ENV === 'production' &&
+    env.JWT_ACCESS_SECRET === 'development-only-change-this-secret-before-use'
+  ) {
+    throw new ConfigurationError('JWT_ACCESS_SECRET must be set to a unique production secret.');
+  }
   if (env.NODE_ENV === 'production' && env.DB_LOGGING) {
     throw new ConfigurationError('DB_LOGGING must be disabled in production.');
   }

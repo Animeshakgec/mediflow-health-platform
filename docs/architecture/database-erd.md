@@ -2,6 +2,8 @@
 
 This logical ERD covers the explicitly scoped MVP: identity/authentication, hospital tenants and branches, scoped staff roles, doctor/patient profiles, availability, and appointments. It is not a migration specification. All primary keys are UUIDs. Tables use `created_at timestamptz` and `updated_at timestamptz` where mutable; append-only histories use `created_at`. Prefer restrictive foreign keys for retained records. Add `deleted_at` only for safely reversible profile/master data.
 
+Phase 2 implements the identity foundation tables `users`, `auth_sessions`, `roles`, `permissions`, `role_permissions`, `memberships`, `membership_roles`, and `platform_user_roles`, plus the minimal `hospitals` tenant root. The profile, branch, schedule, appointment, and audit-event tables shown below remain design-only until their phases.
+
 ## ER diagram
 
 ```mermaid

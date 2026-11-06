@@ -14,6 +14,8 @@ Version the URL for breaking contract changes. Additive optional fields may be i
 - Use `201 Created` and `Location` for created resources, `200 OK` for reads/updates with a body, `202 Accepted` for accepted asynchronous work, and `204 No Content` for successful operations without a body.
 - Do not expose ORM names or internal table layout as a public API contract. Use explicit input/output schemas and avoid returning unnecessary personal data.
 
+Authentication actions are grouped under `/api/v1/auth`: `POST /register`, `POST /login`, `POST /refresh`, `POST /logout`, `GET /me`, and `PATCH /change-password`. Browser refresh credentials are cookies; access credentials use the bearer authorization header. Registration accepts no role or tenant fields.
+
 ## Filtering, sorting, and pagination
 
 Allow-list filters, sort fields, and sort direction. Reject unsupported filters and bound search length. Never interpolate client values into SQL identifiers. Initial pagination uses `page` and `pageSize`, default 25 and maximum 100. Return pagination metadata such as `hasNext`; include total only when its cost is acceptable. Use cursor pagination later for large timelines.
@@ -45,14 +47,14 @@ Validate params, query, and body with Zod at the API boundary; reject unknown or
 
 ## Status code guide
 
-| Status | Use |
-| --- | --- |
-| 400 | Malformed request or invalid encoding |
-| 401 | Missing, invalid, or expired authentication |
-| 403 | Authenticated actor lacks permission |
-| 404 | Resource absent or intentionally concealed |
-| 409 | State, idempotency, or slot conflict |
-| 422 | Syntactically valid input violates domain rules |
-| 429 | Rate limit exceeded |
-| 500 | Unexpected internal failure |
-| 503 | Temporary dependency outage |
+| Status | Use                                             |
+| ------ | ----------------------------------------------- |
+| 400    | Malformed request or invalid encoding           |
+| 401    | Missing, invalid, or expired authentication     |
+| 403    | Authenticated actor lacks permission            |
+| 404    | Resource absent or intentionally concealed      |
+| 409    | State, idempotency, or slot conflict            |
+| 422    | Syntactically valid input violates domain rules |
+| 429    | Rate limit exceeded                             |
+| 500    | Unexpected internal failure                     |
+| 503    | Temporary dependency outage                     |
